@@ -33,7 +33,7 @@
 
 ## Последний измеренный routing benchmark
 
-Полный прогон `data/dev_utterances.json` — 104 тестовых высказывания. Это метрики именно маршрутизации; end-to-end voice latency отдельно не входит в эти цифры:
+Полный прогон `data/dev_utterances.json` — 104 тестовых высказывания. Ниже — последний сохранённый benchmark маршрутизации до финального hardening. Live UI отдельно измеряет STT, router/response, TTS-to-first-audio и полный voice turn:
 
 | Metric | Result |
 |---|---:|
@@ -138,9 +138,24 @@ Web UI показывает технический trace каждого реше
 - extracted slots;
 - STT latency;
 - router latency;
-- total latency.
+- response latency;
+- TTS-to-first-audio latency;
+- end-of-user-turn → first-audio latency для voice turns.
 
 Это позволяет оператору или жюри видеть, почему AI выбрал конкретный сценарий.
+
+## Соответствие must-have HackAlem
+
+| Требование | Реализация |
+|---|---|
+| Голосовое взаимодействие в вебе | Browser MediaRecorder → STT → LLM Router → TTS |
+| LLM-слой выбора сценария | Structured LLM routing по каталогу 40 сценариев, без encoder intent classifier |
+| Корректность выбора | `scripts/evaluate_dev.py`, raw и accepted predictions |
+| Панель трассировки | transcript, proposed/accepted scenarios, reason, alternatives, slots, handoff, latency |
+| Русский / казахский / mixed | Router принимает `ru`, `kk`, `mixed`; reply language передаётся в TTS |
+| Безопасность | необратимые действия не выполняются без явного подтверждения |
+| Передача оператору | simulated handoff с queue + reason в Supervisor Trace |
+| Запуск | `run.bat`, `bash run.sh`, Docker Compose |
 
 ## Быстрый запуск
 
