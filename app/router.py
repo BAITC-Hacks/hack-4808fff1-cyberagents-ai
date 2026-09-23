@@ -170,7 +170,8 @@ class LLMRouter:
             "active_scenarios": state.active_scenarios,
             "scenario_stack": state.scenario_stack,
             "known_slots": state.slots,
-            "recent_history": state.history[-6:],
+            "awaiting_slot": state.awaiting_slot,
+            "recent_history": state.history[-8:],
         }
         started = time.perf_counter()
         response = self.client.responses.parse(
@@ -197,7 +198,7 @@ class LLMRouter:
         decision.alternatives = [x for x in decision.alternatives if x.scenario_id in VALID_IDS]
         if not decision.scenarios:
             from .schemas import RouteCandidate
-            decision.scenarios = [RouteCandidate(scenario_id="SYS_UNCLEAR", confidence=1.0, reason="No valid route returned")]
+            decision.scenarios = [RouteCandidate(scenario_id="SYS_UNCLEAR", confidence=0.0, reason="Router returned no valid catalog scenario")]
 
 
 def accepted_ids(decision: RouterDecision, threshold: float = CONFIDENCE_THRESHOLD) -> list[str]:
