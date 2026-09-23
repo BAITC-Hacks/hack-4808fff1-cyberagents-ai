@@ -1,5 +1,328 @@
-# hack-4808fff1-cyberagents-ai
-Hackathon team repository for CyberAgents AI
-# Voice Router — CyberAgents AI
+# Saqta Voice Router — HackAlem AI
 
-Решение для трека Halyk Bank (HackAlem AI): гибридный голосовой AI-роутер на базе LLM для маршрутизации обращений клиентов контакт-центра.
+Гибридный голосовой AI-ассистент для страхового контакт-центра Saqta Insurance.
+
+Система принимает голосовые и текстовые обращения на русском, казахском и в mixed RU/KK речи, преобразует голос в текст, использует LLM для выбора бизнес-сценария и возвращает голосовой ответ.
+
+Главная идея решения: вместо классического intent-классификатора используется **LLM routing layer**, который учитывает смысл реплики, границы сценариев, multi-intent и состояние диалога.
+
+## Возможности
+
+- 40 бизнес-сценариев Saqta Insurance
+- RU / KK / mixed-language routing
+- Voice input через STT
+- Voice output через TTS
+- LLM-based semantic routing
+- Multi-intent detection
+- Structured Output
+- Dialog state
+- Slot extraction
+- Out-of-scope / unclear / goodbye system intents
+- Scenario boundary handling через `not_this_if`
+- Supervisor Trace для объяснимости решения
+- Confidence score и alternatives
+- Измерение router latency
+- Web UI с микрофоном и текстовым fallback
+- Evaluation pipeline на 104 dev utterances
+- Docker / Docker Compose
+- `.env`-based secret management
+
+## Финальные результаты
+
+Полный прогон `data/dev_utterances.json` — 104 тестовых высказывания:
+
+| Metric | Result |
+|---|---:|
+| Primary accuracy | **96.154%** |
+| Full match | **94.231%** |
+| Multi-intent recall | **92.308%** |
+| Router median latency | **1481 ms** |
+
+Маршрутизатор тестируется на русских, казахских и mixed-language запросах, включая multi-intent и системные сценарии.
+
+## Архитектура
+
+```text
+                    ┌──────────────────────┐
+                    │      Browser UI      │
+                    │  Voice + Text input  │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │         STT          │
+                    │   OpenAI Audio API   │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │     LLM Router       │
+                    │                      │
+                    │ RU / KK / mixed      │
+                    │ Multi-intent         │
+                    │ Structured Output    │
+                    └──────────┬───────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+      scenarios.json     Dialog State     Boundary Rules
+                         + Slots          + not_this_if
+              │                │                │
+              └────────────────┼────────────────┘
+                               ▼
+                    ┌──────────────────────┐
+                    │   Decision Policy    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Scenario Response    │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │         TTS          │
+                    │   OpenAI Audio API   │
+                    └──────────────────────┘
+
+                               └────► Supervisor Trace
+```
+
+## LLM Router
+
+Router не работает как простой keyword classifier.
+
+При выборе сценария учитываются:
+
+- semantic meaning текущей реплики;
+- `description` сценария;
+- `not_this_if` / boundary rules;
+- история диалога;
+- активный сценарий;
+- уже известные slots;
+- RU / KK / mixed speech;
+- multi-intent обращения.
+
+LLM возвращает structured decision, включающий:
+
+```json
+{
+  "language": "ru",
+  "scenarios": [
+    {
+      "scenario_id": "SC06",
+      "confidence": 0.9,
+      "reason": "Travel insurance purchase"
+    }
+  ],
+  "alternatives": [],
+  "slots": {}
+}
+```
+
+## Supervisor Trace
+
+Web UI показывает технический trace каждого решения:
+
+- transcript;
+- detected language;
+- scenario ID;
+- confidence;
+- alternatives;
+- routing reason;
+- extracted slots;
+- STT latency;
+- router latency;
+- total latency.
+
+Это позволяет оператору или жюри видеть, почему AI выбрал конкретный сценарий.
+
+## Быстрый запуск
+
+### Windows
+
+Создать виртуальное окружение:
+
+```powershell
+python -m venv .venv
+```
+
+Активировать:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+Установить зависимости:
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Создать `.env`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Добавить API key:
+
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+Запустить:
+
+```powershell
+.\run.bat
+```
+
+Открыть в браузере:
+
+`http://localhost:8000`
+
+### macOS / Linux
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+./run.sh
+```
+
+## Evaluation
+
+Быстрая проверка первых 10 примеров:
+
+```bash
+python scripts/evaluate_dev.py --limit 10
+```
+
+Полный benchmark:
+
+```bash
+python scripts/evaluate_dev.py
+```
+
+Evaluation сохраняет predictions и рассчитывает:
+
+- Primary accuracy
+- Full match
+- Multi-intent recall
+- Median router latency
+
+## Demo scenarios
+
+### 1. Автострахование
+
+```text
+Сколько стоит обязательная страховка на машину?
+```
+
+Expected route:
+
+```text
+SC01
+```
+
+### 2. Travel insurance
+
+```text
+Мне нужна страховка для поездки за границу.
+```
+
+Expected route:
+
+```text
+SC06
+```
+
+### 3. Kazakh
+
+```text
+Шетелде аяғымды сындырып алдым, сақтандыруым бар.
+```
+
+Expected route:
+
+```text
+SC15
+```
+
+### 4. Out of scope
+
+```text
+Какая погода завтра в Алматы?
+```
+
+Expected route:
+
+```text
+SYS_OUT_OF_SCOPE
+```
+
+### 5. Multi-intent
+
+Router поддерживает несколько независимо actionable intents в одной реплике и возвращает массив сценариев.
+
+## Структура проекта
+
+```text
+voice-router-saqta/
+├── app/
+│   ├── main.py
+│   ├── router.py
+│   ├── assistant.py
+│   ├── audio.py
+│   ├── session.py
+│   ├── schemas.py
+│   ├── data_store.py
+│   ├── config.py
+│   └── static/
+│       └── index.html
+├── data/
+│   ├── scenarios.json
+│   ├── slots.json
+│   ├── actions.json
+│   ├── knowledge_base.json
+│   ├── mock_backend.json
+│   └── dev_utterances.json
+├── scripts/
+│   └── evaluate_dev.py
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── run.bat
+├── run.sh
+└── .env.example
+```
+
+## Security
+
+Секреты не хранятся в репозитории.
+
+`.env` исключён через `.gitignore`.
+
+Для запуска используется `.env.example`, в который не включаются реальные API keys.
+
+## Tech stack
+
+- Python
+- FastAPI
+- Uvicorn
+- OpenAI API
+- Structured Outputs
+- OpenAI Speech-to-Text
+- OpenAI Text-to-Speech
+- HTML / CSS / JavaScript
+- Docker
+
+## HackAlem AI
+
+Проект разработан для кейса **Voice Router — гибридный голосовой AI-робот с LLM-слоем выбора сценария**.
+
+Основной фокус решения — высокая точность semantic routing при живой RU / KK / mixed речи и минимальной задержке.
