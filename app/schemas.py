@@ -36,7 +36,8 @@ class DialogState(BaseModel):
     active_scenarios: list[str] = Field(default_factory=list)
     scenario_stack: list[str] = Field(default_factory=list)
     slots: dict[str, str] = Field(default_factory=dict)
-    history: list[dict[str, str]] = Field(default_factory=list)\n    awaiting_slot: str | None = None
+    history: list[dict[str, str]] = Field(default_factory=list)
+    awaiting_slot: str | None = None
 
 
 class RouteRequest(BaseModel):
@@ -57,6 +58,8 @@ class ChatResponse(BaseModel):
     language: Language
     scenarios: list[RouteCandidate]
     alternatives: list[AlternativeCandidate]
+    accepted_scenarios: list[str] = Field(default_factory=list)
     slots: dict[str, str]
     reason: str
+    handoff: dict | None = None
     latency_ms: dict[str, int]
