@@ -132,39 +132,7 @@ scenario expects a canonical slot such as drivers_iin or region.
 If the client says they themselves will drive but gives no IIN, do not invent an
 IIN; leave drivers_iin missing so the executor can ask for it.
 
-8. CONTINUATION AND SLOT ANSWERS
-If an active scenario exists and the client is answering the assistant's latest
-slot question, set is_continuation=true and keep the active scenario.
-
-Use recent dialog history to determine which required slot the assistant just
-asked for.
-
-A short answer can itself be the slot value. Do not require the client to repeat
-the full request.
-
-Always use the EXACT canonical slot name from the active scenario's required
-or optional slots. Never invent an alias when a canonical slot exists.
-
-Examples of general behavior:
-- country/destination answer -> canonical country slot
-- start date answer -> canonical start-date slot
-- end date answer -> canonical end-date slot
-- number of travelers/drivers/people -> canonical count slot
-- age answer -> canonical age slot
-
-For SC06, the canonical required slots are:
-trip_country, trip_start, trip_end, travelers_count, traveler_max_age.
-
-While SC06 is active:
-- country/destination answer -> trip_country
-- trip start answer -> trip_start
-- trip end answer -> trip_end
-- number of travelers -> travelers_count
-- maximum traveler age -> traveler_max_age
-
-Do not clear previously collected slots during a continuation.
-
-9. CONFIDENCE
+8. CONFIDENCE
 Confidence measures certainty that the selected scenario matches the client's goal.
 It does NOT measure whether all required slots have been collected.
 
@@ -173,12 +141,73 @@ slots are still missing.
 
 Use lower confidence only when two or more scenarios are genuinely plausible.
 
-10. SYSTEM INTENTS
+9. SYSTEM INTENTS
 Use SYS_GOODBYE only when the client is ending the conversation.
 Use SYS_UNCLEAR only for genuine routing ambiguity.
 Use SYS_OUT_OF_SCOPE for a clear request outside the supported catalog.
 
-11. EXPLANATION
+10. EXPLANATION
 Keep reason short, factual, and useful to a supervisor.
 State the semantic distinction that caused the route.
 Never expose hidden chain-of-thought.
+
+SCENARIO CATALOG:
+{compact_scenario_catalog()}
+""".strip()
+
+
+class LLMRouter:
+    def __init__(self, model: str = ROUTER_MODEL):
+        if not OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY is not set. Copy .env.example to .env and add the key.")
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        self.model = model
+
+    def route(self, text: str, state: DialogState | None = None) -> tuple[RouterDecision, int]:
+        state = state or DialogState(session_id="eval")
+        state_summary = {
+            "language": state.language,
+            "active_scenarios": state.active_scenarios,
+            "scenario_stack": state.scenario_stack,
+            "known_slots": state.slots,
+            "recent_history": state.history[-6:],
+        }
+        started = time.perf_counter()
+        response = self.client.responses.parse(
+            model=self.model,
+            input=[
+                {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"DIALOG_STATE:\n{state_summary}\n\nCURRENT_UTTERANCE:\n{text}",
+                },
+            ],
+            text_format=RouterDecision,
+        )
+        elapsed = round((time.perf_counter() - started) * 1000)
+        decision = response.output_parsed
+        if decision is None:
+            raise RuntimeError("Router returned no parsed decision")
+        self._validate_and_clean(decision)
+        return decision, elapsed
+
+    @staticmethod
+    def _validate_and_clean(decision: RouterDecision) -> None:
+        decision.scenarios = [x for x in decision.scenarios if x.scenario_id in VALID_IDS]
+        decision.alternatives = [x for x in decision.alternatives if x.scenario_id in VALID_IDS]
+        if not decision.scenarios:
+            from .schemas import RouteCandidate
+            decision.scenarios = [RouteCandidate(scenario_id="SYS_UNCLEAR", confidence=1.0, reason="No valid route returned")]
+
+
+def accepted_ids(decision: RouterDecision, threshold: float = CONFIDENCE_THRESHOLD) -> list[str]:
+    """Decision policy for the interactive demo.
+
+    System intents are accepted directly. Business routes below the threshold become
+    SYS_UNCLEAR instead of silently guessing.
+    """
+    primary = decision.scenarios[0]
+    if primary.scenario_id.startswith("SYS_"):
+        return [x.scenario_id for x in decision.scenarios]
+    accepted = [x.scenario_id for x in decision.scenarios if x.confidence >= threshold]
+    return accepted or ["SYS_UNCLEAR"]
