@@ -231,7 +231,8 @@
   const micBtn = document.getElementById('micBtn');
 
   let recorder = null;
-  let chunks = [];
+  let recordingBusy = false;
+  let lastSttLatency = 0;
 
 
   function addMessage(text, who) {
@@ -267,7 +268,7 @@
       reason: data.reason,
       slots: data.slots,
       handoff: data.handoff,
-      latency_ms: data.latency_ms
+      latency_ms: { stt: lastSttLatency, ...data.latency_ms }
     }, null, 2);
   }
 
@@ -304,7 +305,8 @@
   }
 
 
-  async function sendText(text) {
+  async function sendText(text, fromVoice = false) {
+    if (!fromVoice) lastSttLatency = 0;
     text = text.trim();
 
     if (!text) return;
@@ -397,322 +399,111 @@
 
 
   micBtn.onclick = async () => {
-
-    /*
-      Если запись уже идёт —
-      повторное нажатие останавливает её.
-    */
     if (recorder && recorder.state === 'recording') {
       recorder.stop();
-
       micBtn.classList.remove('recording');
       micBtn.textContent = '🎙';
-
+      micBtn.disabled = true;
       status.textContent = 'Распознаю речь…';
-
       return;
     }
 
+    if (recordingBusy) return;
 
     try {
-
-      /*
-        Получаем доступ к микрофону.
-      */
-      const stream =
-        await navigator.mediaDevices.getUserMedia({
-          audio: true
-        });
-
-      chunks = [];
-
-
-      /*
-        Выбираем MIME type, который реально
-        поддерживает браузер пользователя.
-      */
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const localChunks = [];
       let mimeType = '';
 
-      if (
-        window.MediaRecorder &&
-        MediaRecorder.isTypeSupported(
-          'audio/webm;codecs=opus'
-        )
-      ) {
-        mimeType = 'audio/webm;codecs=opus';
-
-      } else if (
-        window.MediaRecorder &&
-        MediaRecorder.isTypeSupported(
-          'audio/webm'
-        )
-      ) {
-        mimeType = 'audio/webm';
-
-      } else if (
-        window.MediaRecorder &&
-        MediaRecorder.isTypeSupported(
-          'audio/ogg;codecs=opus'
-        )
-      ) {
-        mimeType = 'audio/ogg;codecs=opus';
+      for (const candidate of [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4'
+      ]) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(candidate)) {
+          mimeType = candidate;
+          break;
+        }
       }
 
-
-      console.log(
-        'Selected MediaRecorder MIME:',
-        mimeType || 'browser default'
-      );
-
-
-      /*
-        Создаём recorder.
-      */
-      recorder = mimeType
-        ? new MediaRecorder(
-            stream,
-            { mimeType }
-          )
+      const localRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream);
 
+      recorder = localRecorder;
+      recordingBusy = true;
 
-      /*
-        Получаем кусочки аудио.
-      */
-      recorder.ondataavailable = (event) => {
-        if (
-          event.data &&
-          event.data.size > 0
-        ) {
-          chunks.push(event.data);
-        }
+      localRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) localChunks.push(event.data);
       };
 
-
-      recorder.onerror = (event) => {
-        console.error(
-          'MediaRecorder error:',
-          event
-        );
-
-        stream
-          .getTracks()
-          .forEach(track => track.stop());
-
+      localRecorder.onerror = () => {
+        stream.getTracks().forEach(track => track.stop());
+        if (recorder === localRecorder) recorder = null;
+        recordingBusy = false;
+        micBtn.disabled = false;
         micBtn.classList.remove('recording');
         micBtn.textContent = '🎙';
-
         status.textContent = '';
-
-        addMessage(
-          'Ошибка записи микрофона. Проверьте разрешение на использование микрофона.',
-          'bot'
-        );
+        addMessage('Ошибка записи микрофона. Проверьте разрешение на микрофон.', 'bot');
       };
 
-
-      /*
-        После остановки записи
-        собираем аудиофайл и отправляем STT.
-      */
-      recorder.onstop = async () => {
-
-        stream
-          .getTracks()
-          .forEach(track => track.stop());
-
-
-        if (!chunks.length) {
-          console.error(
-            'No audio chunks recorded'
-          );
-
-          addMessage(
-            'STT ошибка: браузер не записал аудио. Попробуйте говорить немного дольше.',
-            'bot'
-          );
-
-          status.textContent = '';
-
-          return;
-        }
-
-
-        const actualType =
-          recorder.mimeType ||
-          mimeType ||
-          'audio/webm';
-
-
-        /*
-          Имя файла должно соответствовать
-          фактическому контейнеру.
-        */
-        let extension = 'webm';
-
-        if (actualType.includes('ogg')) {
-          extension = 'ogg';
-
-        } else if (actualType.includes('mp4')) {
-          extension = 'mp4';
-
-        } else if (actualType.includes('wav')) {
-          extension = 'wav';
-        }
-
-
-        const blob = new Blob(
-          chunks,
-          {
-            type: actualType
-          }
-        );
-
-
-        console.log(
-          'Recorded audio:',
-          {
-            mimeType: actualType,
-            extension: extension,
-            size: blob.size,
-            chunks: chunks.length
-          }
-        );
-
-
-        /*
-          Не отправляем пустую запись.
-        */
-        if (blob.size < 1000) {
-
-          addMessage(
-            'STT ошибка: запись получилась слишком короткой. Говорите 2–3 секунды.',
-            'bot'
-          );
-
-          status.textContent = '';
-
-          return;
-        }
-
-
-        const formData = new FormData();
-
-        formData.append(
-          'file',
-          blob,
-          `speech.${extension}`
-        );
-
+      localRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
 
         try {
+          if (!localChunks.length) throw new Error('Аудио не было записано');
 
-          const response =
-            await fetch(
-              '/api/transcribe',
-              {
-                method: 'POST',
-                body: formData
-              }
-            );
+          const actualType = localRecorder.mimeType || mimeType || 'audio/webm';
+          let extension = 'webm';
+          if (actualType.includes('ogg')) extension = 'ogg';
+          else if (actualType.includes('mp4')) extension = 'mp4';
+          else if (actualType.includes('wav')) extension = 'wav';
 
-
-          const data =
-            await response.json();
-
-
-          if (!response.ok) {
-
-            console.error(
-              'STT backend error:',
-              data
-            );
-
-            addMessage(
-              `STT ошибка: ${data.detail || 'unknown'}`,
-              'bot'
-            );
-
-            status.textContent = '';
-
-            return;
+          const blob = new Blob(localChunks, { type: actualType });
+          if (blob.size < 1000) {
+            throw new Error('Запись слишком короткая. Говорите 2–3 секунды.');
           }
 
+          const formData = new FormData();
+          formData.append('file', blob, `speech.${extension}`);
 
-          if (
-            !data.text ||
-            !data.text.trim()
-          ) {
+          const response = await fetch('/api/transcribe', {
+            method: 'POST',
+            body: formData
+          });
+          const data = await response.json();
 
-            addMessage(
-              'Не удалось распознать речь. Попробуйте ещё раз.',
-              'bot'
-            );
+          if (!response.ok) throw new Error(data.detail || 'STT error');
+          if (!data.text || !data.text.trim()) throw new Error('Речь не распознана');
 
-            status.textContent = '';
-
-            return;
-          }
-
-
-          status.textContent =
-            `STT: ${data.latency_ms} ms`;
-
-
-          sendText(data.text);
-
-
+          lastSttLatency = data.latency_ms || 0;
+          status.textContent = `STT: ${lastSttLatency} ms`;
+          await sendText(data.text, true);
         } catch (e) {
-
-          console.error(
-            'STT request error:',
-            e
-          );
-
-          addMessage(
-            `STT ошибка сети: ${e.message}`,
-            'bot'
-          );
-
+          addMessage(`STT ошибка: ${e.message}`, 'bot');
           status.textContent = '';
+        } finally {
+          if (recorder === localRecorder) recorder = null;
+          recordingBusy = false;
+          micBtn.disabled = false;
+          micBtn.classList.remove('recording');
+          micBtn.textContent = '🎙';
         }
       };
 
-
-      /*
-        Каждые 250 мс браузер отдаёт
-        кусочек записи.
-      */
-      recorder.start(250);
-
-
+      localRecorder.start(250);
       micBtn.classList.add('recording');
-
       micBtn.textContent = '■';
-
-      status.textContent =
-        'Говорите… нажмите ещё раз для остановки';
-
-
+      status.textContent = 'Говорите… нажмите ещё раз для остановки';
     } catch (e) {
-
-      console.error(
-        'Microphone error:',
-        e
-      );
-
-
+      recordingBusy = false;
+      micBtn.disabled = false;
       micBtn.classList.remove('recording');
-
       micBtn.textContent = '🎙';
-
       status.textContent = '';
-
-
-      addMessage(
-        `Ошибка микрофона: ${e.message}`,
-        'bot'
-      );
+      addMessage(`Ошибка микрофона: ${e.message}`, 'bot');
     }
   };
 
