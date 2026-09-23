@@ -19,17 +19,21 @@
 - Slot extraction
 - Out-of-scope / unclear / goodbye system intents
 - Scenario boundary handling через `not_this_if`
+- Deterministic scenario executor для ключевых quote/read-only flows
+- Simulated operator handoff с сохранением контекста
+- Confirmation guard для необратимых действий
 - Supervisor Trace для объяснимости решения
 - Confidence score и alternatives
 - Измерение router latency
+- Cross-browser microphone MIME negotiation
 - Web UI с микрофоном и текстовым fallback
 - Evaluation pipeline на 104 dev utterances
 - Docker / Docker Compose
 - `.env`-based secret management
 
-## Финальные результаты
+## Последний измеренный routing benchmark
 
-Полный прогон `data/dev_utterances.json` — 104 тестовых высказывания:
+Полный прогон `data/dev_utterances.json` — 104 тестовых высказывания. Это метрики именно маршрутизации; end-to-end voice latency отдельно не входит в эти цифры:
 
 | Metric | Result |
 |---|---:|
@@ -77,7 +81,7 @@
                                │
                                ▼
                     ┌──────────────────────┐
-                    │ Scenario Response    │
+                    │ Scenario Executor    │
                     └──────────┬───────────┘
                                │
                                ▼
@@ -191,7 +195,13 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-./run.sh
+bash run.sh
+```
+
+### Docker Compose
+
+```bash
+docker compose up --build
 ```
 
 ## Evaluation
@@ -208,12 +218,22 @@ python scripts/evaluate_dev.py --limit 10
 python scripts/evaluate_dev.py
 ```
 
-Evaluation сохраняет predictions и рассчитывает:
+Evaluation сохраняет raw + accepted predictions и рассчитывает:
 
 - Primary accuracy
 - Full match
 - Multi-intent recall
 - Median router latency
+
+## Offline smoke-check
+
+Без внешних API можно проверить детерминированный executor:
+
+```bash
+python scripts/smoke_check.py
+```
+
+Проверяются OGPO quote, travel quote, claim status и office lookup на синтетических данных.
 
 ## Demo scenarios
 
@@ -256,7 +276,7 @@ SC15
 ### 4. Out of scope
 
 ```text
-Какая погода завтра в Алматы?
+Можно у вас взять кредит на машину?
 ```
 
 Expected route:
@@ -326,3 +346,11 @@ voice-router-saqta/
 Проект разработан для кейса **Voice Router — гибридный голосовой AI-робот с LLM-слоем выбора сценария**.
 
 Основной фокус решения — высокая точность semantic routing при живой RU / KK / mixed речи и минимальной задержке.
+
+## Safety and current scope
+
+- Все данные в `data/` синтетические.
+- Необратимые действия не выполняются молча: требуется явное подтверждение клиента.
+- Handoff в веб-демо моделируется очередью оператора и отображается в Supervisor Trace.
+- Реализованы детерминированные расчёты/поиски для ключевых quote/read-only сценариев; остальные сценарии продолжают безопасный grounded flow.
+- `.env` исключён из Git и Docker build context через `.dockerignore`.
