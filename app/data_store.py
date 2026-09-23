@@ -71,6 +71,8 @@ def compact_scenario_catalog() -> str:
             f"{s['scenario_id']} | {s['name']} | priority={s['priority']}\n"
             f"DESC: {s['description']}\n"
             f"BOUNDARIES: {boundaries}\n"
+            f"SLOTS_REQUIRED: {', '.join(s.get('slots', {}).get('required', [])) or 'none'}\n"
+            f"SLOTS_OPTIONAL: {', '.join(s.get('slots', {}).get('optional', [])) or 'none'}\n"
             f"RU: {ru}\nKK: {kk}"
         )
     lines.append(
