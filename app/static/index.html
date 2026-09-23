@@ -261,10 +261,12 @@
     trace.textContent = JSON.stringify({
       transcript: data.transcript,
       language: data.language,
-      scenarios: data.scenarios,
+      scenarios_proposed: data.scenarios,
+      accepted_scenarios: data.accepted_scenarios,
       alternatives: data.alternatives,
       reason: data.reason,
       slots: data.slots,
+      handoff: data.handoff,
       latency_ms: data.latency_ms
     }, null, 2);
   }
@@ -283,7 +285,10 @@
         })
       });
 
-      if (!r.ok) return;
+      if (!r.ok) {
+        status.textContent = 'TTS недоступен — текстовый ответ сохранён';
+        return;
+      }
 
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
