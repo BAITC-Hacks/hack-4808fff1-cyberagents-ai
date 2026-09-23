@@ -297,6 +297,7 @@ voice-router-saqta/
 │   ├── main.py
 │   ├── router.py
 │   ├── assistant.py
+│   ├── executor.py
 │   ├── audio.py
 │   ├── session.py
 │   ├── schemas.py
@@ -312,7 +313,8 @@ voice-router-saqta/
 │   ├── mock_backend.json
 │   └── dev_utterances.json
 ├── scripts/
-│   └── evaluate_dev.py
+│   ├── evaluate_dev.py
+│   └── smoke_check.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
