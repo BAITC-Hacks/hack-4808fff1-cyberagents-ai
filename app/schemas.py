@@ -33,10 +33,10 @@ class RouterDecision(BaseModel):
 class DialogState(BaseModel):
     session_id: str
     language: Language = "ru"
-    active_scenarios: list[str] = []
-    scenario_stack: list[str] = []
-    slots: dict[str, str] = {}
-    history: list[dict[str, str]] = []
+    active_scenarios: list[str] = Field(default_factory=list)
+    scenario_stack: list[str] = Field(default_factory=list)
+    slots: dict[str, str] = Field(default_factory=dict)
+    history: list[dict[str, str]] = Field(default_factory=list)\n    awaiting_slot: str | None = None
 
 
 class RouteRequest(BaseModel):
