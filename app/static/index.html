@@ -233,6 +233,7 @@
   let recorder = null;
   let recordingBusy = false;
   let lastSttLatency = 0;
+  let voiceTurnStart = 0;
 
 
   function addMessage(text, who) {
@@ -274,36 +275,37 @@
 
 
   async function speak(text, language) {
+    const started = performance.now();
     try {
       const r = await fetch('/api/tts', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text,
-          language
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language })
       });
 
       if (!r.ok) {
         status.textContent = 'TTS недоступен — текстовый ответ сохранён';
-        return;
+        return null;
       }
 
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-
       audio.onended = () => URL.revokeObjectURL(url);
 
       await audio.play();
 
+      return {
+        tts_first_audio: Math.round(performance.now() - started),
+        voice_total: voiceTurnStart
+          ? Math.round(performance.now() - voiceTurnStart)
+          : 0
+      };
     } catch (e) {
       console.error('TTS error:', e);
+      return null;
     }
   }
-
 
   async function sendText(text, fromVoice = false) {
     if (!fromVoice) lastSttLatency = 0;
@@ -347,10 +349,23 @@
       status.textContent =
         `Router: ${data.latency_ms.router} ms • total: ${data.latency_ms.total} ms`;
 
-      speak(
+      const ttsMetrics = await speak(
         data.reply,
         data.language === 'kk' ? 'kk' : 'ru'
       );
+
+      if (ttsMetrics) {
+        data.latency_ms = {
+          stt: lastSttLatency,
+          ...data.latency_ms,
+          ...ttsMetrics
+        };
+        setTrace(data);
+        status.textContent =
+          `Router: ${data.latency_ms.router} ms • voice total: ${ttsMetrics.voice_total || 'n/a'} ms`;
+      }
+
+      voiceTurnStart = 0;
 
     } catch (e) {
       console.error('Chat error:', e);
@@ -400,6 +415,7 @@
 
   micBtn.onclick = async () => {
     if (recorder && recorder.state === 'recording') {
+      voiceTurnStart = performance.now();
       recorder.stop();
       micBtn.classList.remove('recording');
       micBtn.textContent = '🎙';
